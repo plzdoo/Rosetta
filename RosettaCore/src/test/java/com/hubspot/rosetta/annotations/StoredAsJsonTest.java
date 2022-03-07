@@ -1,14 +1,20 @@
 package com.hubspot.rosetta.annotations;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Comparator;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,6 +55,8 @@ public class StoredAsJsonTest {
 
   private StoredAsJsonTypeInfoBean typeInfoBean;
   private final JsonNode expectedTypeInfo = TextNode.valueOf("{\"generalValue\":\"General\",\"concreteValue\":\"internal\",\"type\":\"concrete\"}");
+  private ObjectMapper objectMapper = new ObjectMapper();
+
 
   @Before
   public void setup() {
@@ -518,11 +526,15 @@ public class StoredAsJsonTest {
   }
 
   @Test
-  public void itHandlesAnnotatedGenericFieldSerialization() {
+  public void itHandlesAnnotatedGenericFieldSerialization() throws java.io.IOException {
     bean.setTypeInfoField(typeInfoBean);
+    String s1 = Rosetta.getMapper().valueToTree(bean).get("typeInfoField").toString();
+    String s2 = expectedTypeInfo.toString();
 
-    assertThat(Rosetta.getMapper().valueToTree(bean).get("typeInfoField"))
-        .isEqualTo(expectedTypeInfo);
+    JsonNode node1 = objectMapper.readTree(s1);
+    JsonNode node2 = objectMapper.readTree(s2);
+    
+    assertEquals(0, new ComparatorWithoutOrder().compare(node1, node2));
   }
 
   @Test
@@ -682,3 +694,65 @@ public class StoredAsJsonTest {
     FieldBeanStoredAsJson res = Rosetta.getMapper().readValue(node.toString(), FieldBeanStoredAsJson.class);
   }
 }
+
+//https://stackoverflow.com/questions/69012124/java-jackson-compare-two-jsons-ignoring-order-of-keys-and-elements-in-arrays
+//this is a custom comparator that ignore the order which is found on the website above
+
+class ComparatorWithoutOrder implements Comparator<JsonNode> {
+
+        @Override
+        public int compare(JsonNode o1, JsonNode o2) {
+            if(o1 == o2) {
+                return 0;
+            }
+            if(o1.getClass() != o2.getClass()) {
+                System.out.println("class not equal");
+                return -1;
+            }
+            if(o1.getClass() == ObjectNode.class) {
+                List<String> o1FieldNames = new ArrayList<>();
+                o1.fieldNames().forEachRemaining(o1FieldNames::add);
+                List<String> o2FieldNames = new ArrayList<>();
+                o2.fieldNames().forEachRemaining(o2FieldNames::add);
+                if(o1FieldNames.size() != o2FieldNames.size()) {
+                    System.out.println("size");
+                    return -1;
+                }
+                if(!o2FieldNames.containsAll(o1FieldNames) || !o1FieldNames.containsAll(o2FieldNames)) {
+                    System.out.println("field");
+                    return -1;
+                }
+                for (String o1FieldName : o1FieldNames) {
+                    if (!(compare(o1.get(o1FieldName), o2.get(o1FieldName)) == 0)) {
+                        System.out.println("field diff");
+                        return -1;
+                    }
+                }
+                return 0;
+            }
+            if(o1.getClass() == ArrayNode.class) {
+                List<JsonNode> o1Children = new ArrayList<>();
+                o1.elements().forEachRemaining(o1Children::add);
+                List<JsonNode> o2Children = new ArrayList<>();
+                o2.elements().forEachRemaining(o2Children::add);
+                if(o1Children.size() != o2Children.size()) {
+                    return -1;
+                }
+                for (JsonNode c1 : o1Children) {
+                    boolean found = false;
+                    for (JsonNode c2 : o2Children) {
+                        if (compare(c1, c2) == 0) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        return -1;
+                    }
+                }
+                return 0;
+
+            }
+            return 0;
+        }
+    }
